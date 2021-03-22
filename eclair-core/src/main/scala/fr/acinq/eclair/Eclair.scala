@@ -20,11 +20,14 @@ import akka.actor.ActorRef
 import akka.pattern._
 import akka.util.Timeout
 import fr.acinq.bitcoin.Crypto.PublicKey
-import fr.acinq.bitcoin.{ByteVector32, ByteVector64, Crypto, Satoshi}
+import fr.acinq.bitcoin.{Btc, ByteVector32, ByteVector64, Crypto, Satoshi}
 import fr.acinq.eclair.TimestampQueryFilters._
+import fr.acinq.eclair.balance.CheckBalance
+import fr.acinq.eclair.balance.CheckBalance.{BalanceResult, CorrectedOnchainBalance}
 import fr.acinq.eclair.blockchain.OnChainBalance
 import fr.acinq.eclair.blockchain.bitcoind.BitcoinCoreWallet
 import fr.acinq.eclair.blockchain.bitcoind.BitcoinCoreWallet.WalletTransaction
+import fr.acinq.eclair.blockchain.bitcoind.rpc.ExtendedBitcoinClient
 import fr.acinq.eclair.blockchain.fee.{FeeratePerByte, FeeratePerKw}
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.db.AuditDb.{NetworkFee, Stats}
@@ -39,6 +42,7 @@ import fr.acinq.eclair.payment.send.PaymentInitiator.{SendPayment, SendPaymentTo
 import fr.acinq.eclair.router.Router._
 import fr.acinq.eclair.router.{NetworkStats, RouteCalculation, Router}
 import fr.acinq.eclair.wire.protocol._
+import grizzled.slf4j.Logging
 import scodec.bits.ByteVector
 
 import java.nio.charset.StandardCharsets
@@ -53,15 +57,31 @@ case class AuditResponse(sent: Seq[PaymentSent], received: Seq[PaymentReceived],
 
 case class TimestampQueryFilters(from: Long, to: Long)
 
+case class MutualCloseStatus(unpublished: Satoshi, unconfirmed: Satoshi, confirmed: Satoshi)
+
+case class GlobalBalance private(total: Btc, onchain: CorrectedOnchainBalance, offchain: BalanceResult, mutualClose: MutualCloseStatus)
+
+object GlobalBalance {
+
+  private def apply(total: Btc, onchain: CorrectedOnchainBalance, offchain: BalanceResult, mutualClose: MutualCloseStatus): GlobalBalance = ???
+
+  def apply(onchain: CorrectedOnchainBalance, offchain: BalanceResult, mutualClose: MutualCloseStatus): GlobalBalance = new GlobalBalance(
+    total = onchain.total + offchain.total,
+    onchain = onchain,
+    offchain = offchain,
+    mutualClose = mutualClose
+  )
+}
+
 case class SignedMessage(nodeId: PublicKey, message: String, signature: ByteVector)
 
 case class VerifiedMessage(valid: Boolean, publicKey: PublicKey)
 
 object TimestampQueryFilters {
   /** We use this in the context of timestamp filtering, when we don't need an upper bound. */
-  val MaxEpochMilliseconds = Duration.fromNanos(Long.MaxValue).toMillis
+  val MaxEpochMilliseconds: Long = Duration.fromNanos(Long.MaxValue).toMillis
 
-  def getDefaultTimestampFilters(from_opt: Option[Long], to_opt: Option[Long]) = {
+  def getDefaultTimestampFilters(from_opt: Option[Long], to_opt: Option[Long]): TimestampQueryFilters = {
     // NB: we expect callers to use seconds, but internally we use milli-seconds everywhere.
     val from = from_opt.getOrElse(0L).seconds.toMillis
     val to = to_opt.map(_.seconds.toMillis).getOrElse(MaxEpochMilliseconds)
@@ -149,12 +169,14 @@ trait Eclair {
 
   def onChainTransactions(count: Int, skip: Int): Future[Iterable[WalletTransaction]]
 
+  def globalBalance(channels_opt: Option[Map[ByteVector32, HasCommitments]])(implicit timeout: Timeout): Future[GlobalBalance]
+
   def signMessage(message: ByteVector): SignedMessage
 
   def verifyMessage(message: ByteVector, recoverableSignature: ByteVector): VerifiedMessage
 }
 
-class EclairImpl(appKit: Kit) extends Eclair {
+class EclairImpl(appKit: Kit) extends Eclair with Logging {
 
   implicit val ec: ExecutionContext = appKit.system.dispatcher
 
@@ -427,6 +449,29 @@ class EclairImpl(appKit: Kit) extends Eclair {
 
   override def usableBalances()(implicit timeout: Timeout): Future[Iterable[UsableBalance]] =
     (appKit.relayer ? GetOutgoingChannels()).mapTo[OutgoingChannels].map(_.channels.map(_.toUsableBalance))
+
+  override def globalBalance(channels_opt: Option[Map[ByteVector32, HasCommitments]])(implicit timeout: Timeout): Future[GlobalBalance] = {
+    val start = System.currentTimeMillis()
+    val bitcoinClient = new ExtendedBitcoinClient(appKit.bitcoin)
+    for {
+      onchain <- CheckBalance.onChain(bitcoinClient)
+      channels <- channels_opt match {
+        case Some(channels) => Future.successful(channels.values)
+        case None => for {
+          channelIds <- (appKit.register ? Symbol("channels")).mapTo[Map[ByteVector32, ActorRef]].map(_.keys)
+          channelsRes <- Future.sequence(channelIds.map(channelId => sendToChannel[RES_GETINFO](Left(channelId), CMD_GETINFO(ActorRef.noSender))))
+        } yield channelsRes.collect { case RES_GETINFO(_, _, _, data: HasCommitments) => data }
+      }
+      knownPreimages = appKit.nodeParams.db.pendingCommands.listSettlementCommands().collect { case (channelId, cmd: CMD_FULFILL_HTLC) => (channelId, cmd.id) }.toSet
+      rawBalanceResult = CheckBalance.computeBalance(channels, knownPreimages)
+      balanceResults <- CheckBalance.prunePublishedTransactions(rawBalanceResult, bitcoinClient)
+      mutualCloseStatus <- CheckBalance.mutualCloseStatus(channels, bitcoinClient)
+    } yield {
+      val end = System.currentTimeMillis()
+      logger.info(s"computed balance in ${end - start}ms")
+      GlobalBalance(onchain, balanceResults, mutualCloseStatus)
+    }
+  }
 
   override def signMessage(message: ByteVector): SignedMessage = {
     val bytesToSign = SignedMessage.signedBytes(message)

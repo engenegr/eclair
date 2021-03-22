@@ -19,7 +19,7 @@ package fr.acinq.eclair.api.serde
 import com.google.common.net.HostAndPort
 import de.heikoseeberger.akkahttpjson4s.Json4sSupport
 import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
-import fr.acinq.bitcoin.{ByteVector32, ByteVector64, OutPoint, Satoshi, Transaction}
+import fr.acinq.bitcoin.{Btc, ByteVector32, ByteVector64, OutPoint, Satoshi, Transaction}
 import fr.acinq.eclair.ApiTypes.ChannelIdentifier
 import fr.acinq.eclair.blockchain.fee.FeeratePerKw
 import fr.acinq.eclair.channel._
@@ -56,6 +56,12 @@ class ByteVector32Serializer extends CustomSerializer[ByteVector32](_ => ( {
   case x: ByteVector32 => JString(x.toHex)
 }))
 
+class ByteVector32KeySerializer extends CustomKeySerializer[ByteVector32](_ => ( {
+  null
+}, {
+  case x: ByteVector32 => x.toHex
+}))
+
 class ByteVector64Serializer extends CustomSerializer[ByteVector64](_ => ( {
   null
 }, {
@@ -66,6 +72,12 @@ class UInt64Serializer extends CustomSerializer[UInt64](_ => ( {
   null
 }, {
   case x: UInt64 => JInt(x.toBigInt)
+}))
+
+class BtcSerializer extends CustomSerializer[Btc](_ => ( {
+  null
+}, {
+  case x: Btc => JDecimal(x.toDouble)
 }))
 
 class SatoshiSerializer extends CustomSerializer[Satoshi](_ => ( {
@@ -429,9 +441,11 @@ object JsonSupport extends Json4sSupport {
   implicit val formats = (org.json4s.DefaultFormats +
     new ByteVectorSerializer +
     new ByteVector32Serializer +
+    new ByteVector32KeySerializer +
     new ByteVector64Serializer +
     new ChannelEventSerializer +
     new UInt64Serializer +
+    new BtcSerializer +
     new SatoshiSerializer +
     new MilliSatoshiSerializer +
     new CltvExpirySerializer +
