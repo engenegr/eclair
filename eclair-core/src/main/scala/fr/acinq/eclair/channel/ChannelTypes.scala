@@ -476,7 +476,36 @@ final case class RemoteParams(nodeId: PublicKey,
                               paymentBasepoint: PublicKey,
                               delayedPaymentBasepoint: PublicKey,
                               htlcBasepoint: PublicKey,
-                              features: Features)
+                              features: Features,
+                              shutdownScript: Option[ByteVector] = None)
+object RemoteParams {
+  def apply(nodeId: PublicKey,
+            dustLimit: Satoshi,
+            maxHtlcValueInFlightMsat: UInt64, // this is not MilliSatoshi because it can exceed the total amount of MilliSatoshi
+            channelReserve: Satoshi,
+            htlcMinimum: MilliSatoshi,
+            toSelfDelay: CltvExpiryDelta,
+            maxAcceptedHtlcs: Int,
+            fundingPubKey: PublicKey,
+            revocationBasepoint: PublicKey,
+            paymentBasepoint: PublicKey,
+            delayedPaymentBasepoint: PublicKey,
+            htlcBasepoint: PublicKey,
+            features: Features): RemoteParams = new RemoteParams(nodeId,
+    dustLimit,
+    maxHtlcValueInFlightMsat,
+    channelReserve,
+    htlcMinimum,
+    toSelfDelay,
+    maxAcceptedHtlcs,
+    fundingPubKey,
+    revocationBasepoint,
+    paymentBasepoint,
+    delayedPaymentBasepoint,
+    htlcBasepoint,
+    features,
+    None)
+}
 
 object ChannelFlags {
   val AnnounceChannel = 0x01.toByte
@@ -503,6 +532,7 @@ case class ChannelVersion(bits: BitVector) {
   def hasPubkeyKeyPath: Boolean = isSet(USE_PUBKEY_KEYPATH_BIT)
   def hasStaticRemotekey: Boolean = isSet(USE_STATIC_REMOTEKEY_BIT)
   def hasAnchorOutputs: Boolean = isSet(USE_ANCHOR_OUTPUTS_BIT)
+  def hasOptionUpfrontShutdownScript: Boolean = isSet(USE_OPTION_UPFRONT_SHUTDOWN_SCRIPT)
   /** True if our main output in the remote commitment is directly sent (without any delay) to one of our wallet addresses. */
   def paysDirectlyToWallet: Boolean = hasStaticRemotekey && !hasAnchorOutputs
 }
@@ -515,16 +545,22 @@ object ChannelVersion {
   private val USE_PUBKEY_KEYPATH_BIT = 0 // bit numbers start at 0
   private val USE_STATIC_REMOTEKEY_BIT = 1
   private val USE_ANCHOR_OUTPUTS_BIT = 2
+  private val USE_OPTION_UPFRONT_SHUTDOWN_SCRIPT = 3
 
   def fromBit(bit: Int): ChannelVersion = ChannelVersion(BitVector.low(LENGTH_BITS).set(bit).reverse)
 
   def pickChannelVersion(localFeatures: Features, remoteFeatures: Features): ChannelVersion = {
-    if (Features.canUseFeature(localFeatures, remoteFeatures, Features.AnchorOutputs)) {
+    val version = if (Features.canUseFeature(localFeatures, remoteFeatures, Features.AnchorOutputs)) {
       ANCHOR_OUTPUTS
     } else if (Features.canUseFeature(localFeatures, remoteFeatures, Features.StaticRemoteKey)) {
       STATIC_REMOTEKEY
     } else {
       STANDARD
+    }
+    if (Features.canUseFeature(localFeatures, remoteFeatures, Features.OptionUpfrontShutdownScript)) {
+      version | fromBit(USE_OPTION_UPFRONT_SHUTDOWN_SCRIPT)
+    } else {
+      version
     }
   }
 
@@ -532,5 +568,6 @@ object ChannelVersion {
   val STANDARD = ZEROES | fromBit(USE_PUBKEY_KEYPATH_BIT)
   val STATIC_REMOTEKEY = STANDARD | fromBit(USE_STATIC_REMOTEKEY_BIT) // PUBKEY_KEYPATH + STATIC_REMOTEKEY
   val ANCHOR_OUTPUTS = STATIC_REMOTEKEY | fromBit(USE_ANCHOR_OUTPUTS_BIT) // PUBKEY_KEYPATH + STATIC_REMOTEKEY + ANCHOR_OUTPUTS
+  val OPTION_UPFRONT_SHUTDOWN_SCRIPT = STANDARD | fromBit(USE_OPTION_UPFRONT_SHUTDOWN_SCRIPT)
 }
 // @formatter:on

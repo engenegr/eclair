@@ -28,7 +28,7 @@ import fr.acinq.eclair.wire.internal.channel.version0.ChannelTypes0.{HtlcTxAndSi
 import fr.acinq.eclair.wire.protocol.CommonCodecs._
 import fr.acinq.eclair.wire.protocol.LightningMessageCodecs._
 import fr.acinq.eclair.wire.protocol.UpdateMessage
-import scodec.bits.BitVector
+import scodec.bits.{BitVector, ByteVector}
 import scodec.codecs._
 import scodec.{Attempt, Codec}
 
@@ -89,7 +89,8 @@ private[channel] object ChannelCodecs0 {
         ("paymentBasepoint" | publicKey) ::
         ("delayedPaymentBasepoint" | publicKey) ::
         ("htlcBasepoint" | publicKey) ::
-        ("features" | combinedFeaturesCodec)).as[RemoteParams].decodeOnly
+        ("features" | combinedFeaturesCodec) ::
+        ("shutdownScript" | provide[Option[ByteVector]](None))).as[RemoteParams].decodeOnly
 
     val htlcCodec: Codec[DirectedHtlc] = discriminated[DirectedHtlc].by(bool)
       .typecase(true, updateAddHtlcCodec.as[IncomingHtlc])
