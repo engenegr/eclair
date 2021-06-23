@@ -18,7 +18,7 @@ package fr.acinq.eclair.channel
 
 import fr.acinq.eclair.FeatureSupport.Optional
 import fr.acinq.eclair.Features
-import fr.acinq.eclair.Features.{AnchorOutputs, StaticRemoteKey}
+import fr.acinq.eclair.Features.{AnchorOutputs, OptionUpfrontShutdownScript, StaticRemoteKey}
 import fr.acinq.eclair.transactions.Transactions.{AnchorOutputsCommitmentFormat, CommitmentFormat, DefaultCommitmentFormat}
 
 /**
@@ -45,6 +45,7 @@ case class ChannelType(features: Features) {
     features.hasFeature(Features.StaticRemoteKey) && !features.hasFeature(Features.AnchorOutputs)
   }
 
+  def hasOptionUpfrontShutdownScript: Boolean = features.hasFeature(Features.OptionUpfrontShutdownScript)
 }
 
 object ChannelTypes {
@@ -57,13 +58,16 @@ object ChannelTypes {
    * Pick the channel type that should be applied based on features alone (in case our peer doesn't support explicit channel type negotiation).
    */
   def pickChannelType(localFeatures: Features, remoteFeatures: Features): ChannelType = {
-    if (Features.canUseFeature(localFeatures, remoteFeatures, AnchorOutputs)) {
-      anchorOutputs
+    val features = if (Features.canUseFeature(localFeatures, remoteFeatures, AnchorOutputs)) {
+      Features(StaticRemoteKey -> Optional, AnchorOutputs -> Optional)
     } else if (Features.canUseFeature(localFeatures, remoteFeatures, StaticRemoteKey)) {
-      staticRemoteKey
+      Features(StaticRemoteKey -> Optional)
     } else {
-      standard
+      Features.empty
     }
+    val features1 = if (Features.canUseFeature(localFeatures, remoteFeatures, OptionUpfrontShutdownScript)) {
+      features.copy(activated = features.activated + (OptionUpfrontShutdownScript -> Optional))
+    } else features
+    ChannelType(features1)
   }
-
 }
