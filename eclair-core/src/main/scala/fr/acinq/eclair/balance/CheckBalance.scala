@@ -27,7 +27,7 @@ object CheckBalance {
   }
 
   /**
-   * In the closing staten some transactions may be published or even confirmed. They will be taken into account if we
+   * In the closing state some transactions may be published or even confirmed. They will be taken into account if we
    * do a `bitcoin-cli getbalance` and we don't want to count them twice.
    *
    * That's why we keep track of the id of each transaction that pays us any amount. It allows us to double check from
