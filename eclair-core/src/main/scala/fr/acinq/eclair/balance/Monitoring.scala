@@ -26,14 +26,16 @@ object Monitoring {
     val GlobalBalanceNormalized: Metric.Gauge = Kamon.gauge("globalbalance.normalized", "Global Balance Normalized")
     val GlobalBalanceDiff: Metric.Gauge = Kamon.gauge("globalbalance.diff", "Global Balance Diff (Satoshi)")
     val GlobalBalanceDetailed: Metric.Gauge = Kamon.gauge("globalbalance.detailed", "Global Balance Detailed (BTC)")
+    val BitcoinBalance: Metric.Gauge = Kamon.gauge("bitcoin.balance", "Bitcoin balance (mBTC)")
+    val UtxoCount: Metric.Gauge = Kamon.gauge("bitcoin.utxo.count", "Number of unspent outputs available")
   }
 
   object Tags {
     val BalanceType = "type"
     val OffchainState = "state"
     val DiffSign = "sign"
+    val UtxoStatus = "status"
 
-    /** TODO: there is duplication with [[fr.acinq.eclair.blockchain.Monitoring]] */
     object BalanceTypes {
       val OnchainConfirmed = "onchain.confirmed"
       val OnchainUnconfirmed = "onchain.unconfirmed"
@@ -56,6 +58,13 @@ object Monitoring {
     object DiffSigns {
       val plus = "plus"
       val minus = "minus"
+    }
+
+    object UtxoStatuses {
+      val Confirmed = "confirmed"
+      val Safe = "safe"
+      val Unsafe = "unsafe"
+      val Unconfirmed = "unconfirmed"
     }
 
   }

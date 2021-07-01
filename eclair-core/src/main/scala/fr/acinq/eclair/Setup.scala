@@ -302,7 +302,7 @@ class Setup(val datadir: File,
         server = server,
         wallet = wallet)
 
-      _ = system.spawn(BalanceActor(new EclairImpl(kit), channelsListener, nodeParams.balanceCheckInterval), name = "balance-actor")
+      _ = system.spawn(BalanceActor(extendedBitcoinClient, new EclairImpl(kit), channelsListener, nodeParams.balanceCheckInterval), name = "balance-actor")
 
       zmqBlockTimeout = after(5 seconds, using = system.scheduler)(Future.failed(BitcoinZMQConnectionTimeoutException))
       zmqTxTimeout = after(5 seconds, using = system.scheduler)(Future.failed(BitcoinZMQConnectionTimeoutException))

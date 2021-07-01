@@ -2,12 +2,17 @@ package fr.acinq.eclair.balance
 
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, Behavior}
-import fr.acinq.eclair.balance.BalanceActor.{Command, TickBalance, WrappedChannels, WrappedGlobalBalance}
+import fr.acinq.bitcoin.ByteVector32
+import fr.acinq.eclair.balance.BalanceActor._
 import fr.acinq.eclair.balance.Monitoring.{Metrics, Tags}
+import fr.acinq.eclair.blockchain.bitcoind.rpc.ExtendedBitcoinClient
+import fr.acinq.eclair.blockchain.bitcoind.rpc.ExtendedBitcoinClient.Utxo
 import fr.acinq.eclair.{Eclair, GlobalBalance}
+import grizzled.slf4j.Logger
+import org.json4s.JsonAST.JInt
 
-import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 
 object BalanceActor {
@@ -17,20 +22,45 @@ object BalanceActor {
   private final case object TickBalance extends Command
   private final case class WrappedChannels(wrapped: ChannelsListener.GetChannelsResponse) extends Command
   private final case class WrappedGlobalBalance(wrapped: Try[GlobalBalance]) extends Command
+  private final case class WrappedUtxoInfo(wrapped: Try[UtxoInfo]) extends Command
   // @formatter:on
 
-  def apply(eclair: Eclair, channelsListener: ActorRef[ChannelsListener.GetChannels], interval: FiniteDuration)(implicit ec: ExecutionContext): Behavior[Command] = {
+  def apply(extendedBitcoinClient: ExtendedBitcoinClient, eclair: Eclair, channelsListener: ActorRef[ChannelsListener.GetChannels], interval: FiniteDuration)(implicit ec: ExecutionContext): Behavior[Command] = {
     Behaviors.setup { context =>
       Behaviors.withTimers { timers =>
         timers.startTimerWithFixedDelay(TickBalance, interval)
-        new BalanceActor(context, eclair, channelsListener).apply(refBalance_opt = None)
+        new BalanceActor(context, extendedBitcoinClient, eclair, channelsListener).apply(refBalance_opt = None)
       }
     }
+  }
+
+  final case class UtxoInfo(utxos: Seq[Utxo], ancestorCount: Map[ByteVector32, Long])
+
+  def checkUtxos(extendedBitcoinClient: ExtendedBitcoinClient)(implicit ec: ExecutionContext): Future[UtxoInfo] = {
+
+    def getUnconfirmedAncestorCount(utxo: Utxo): Future[(ByteVector32, Long)] = extendedBitcoinClient.rpcClient.invoke("getmempoolentry", utxo.txid).map(json => {
+      val JInt(ancestorCount) = json \ "ancestorcount"
+      (utxo.txid, ancestorCount.toLong)
+    }).recover {
+      case ex: Throwable =>
+        // a bit hackish but we don't need the actor context for this simple log
+        val log = Logger(classOf[BalanceActor])
+        log.warn(s"could not retrieve unconfirmed ancestor count for txId=${utxo.txid} amount=${utxo.amount}:", ex)
+        (utxo.txid, 0)
+    }
+
+    def getUnconfirmedAncestorCountMap(utxos: Seq[Utxo]): Future[Map[ByteVector32, Long]] = Future.sequence(utxos.filter(_.confirmations == 0).map(getUnconfirmedAncestorCount)).map(_.toMap)
+
+    for {
+      utxos <- extendedBitcoinClient.listUnspent()
+      ancestorCount <- getUnconfirmedAncestorCountMap(utxos)
+    } yield UtxoInfo(utxos, ancestorCount)
   }
 
 }
 
 private class BalanceActor(context: ActorContext[Command],
+                           extendedBitcoinClient: ExtendedBitcoinClient,
                            eclair: Eclair,
                            channelsListener: ActorRef[ChannelsListener.GetChannels])(implicit ec: ExecutionContext) {
 
@@ -40,6 +70,7 @@ private class BalanceActor(context: ActorContext[Command],
     case TickBalance =>
       log.debug("checking balance...")
       channelsListener ! ChannelsListener.GetChannels(context.messageAdapter[ChannelsListener.GetChannelsResponse](WrappedChannels))
+      context.pipeToSelf(checkUtxos(extendedBitcoinClient))(WrappedUtxoInfo)
       Behaviors.same
     case WrappedChannels(res) =>
       val self = context.self
@@ -78,6 +109,26 @@ private class BalanceActor(context: ActorContext[Command],
           log.warn("could not compute balance: ", t)
           Behaviors.same
       }
+    case WrappedUtxoInfo(res) =>
+      res match {
+        case Success(UtxoInfo(utxos: Seq[Utxo], ancestorCount: Map[ByteVector32, Long])) =>
+          val filteredByStatus: Map[String, Seq[Utxo]] = Map(
+            Monitoring.Tags.UtxoStatuses.Confirmed -> utxos.filter(utxo => utxo.confirmations > 0),
+            // We cannot create chains of unconfirmed transactions with more than 25 elements, so we ignore such utxos.
+            Monitoring.Tags.UtxoStatuses.Unconfirmed -> utxos.filter(utxo => utxo.confirmations == 0 && ancestorCount.getOrElse(utxo.txid, 1L) < 25),
+            Monitoring.Tags.UtxoStatuses.Safe -> utxos.filter(utxo => utxo.safe),
+            Monitoring.Tags.UtxoStatuses.Unsafe -> utxos.filter(utxo => !utxo.safe),
+          )
+          filteredByStatus.foreach {
+            case (status, filteredUtxos) =>
+              val amount = filteredUtxos.map(_.amount.toDouble).sum
+              log.info(s"we have ${filteredUtxos.length} $status utxos ($amount mBTC)")
+              Monitoring.Metrics.UtxoCount.withTag(Monitoring.Tags.UtxoStatus, status).update(filteredUtxos.length)
+              Monitoring.Metrics.BitcoinBalance.withTag(Monitoring.Tags.UtxoStatus, status).update(amount)
+          }
+        case Failure(t) =>
+          log.warn("could not check utxos: ", t)
+      }
+      Behaviors.same
   }
-
 }
