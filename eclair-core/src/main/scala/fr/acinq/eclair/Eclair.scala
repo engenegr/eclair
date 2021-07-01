@@ -59,7 +59,7 @@ case class TimestampQueryFilters(from: Long, to: Long)
 
 case class MutualCloseStatus(unpublished: Satoshi, unconfirmed: Satoshi, confirmed: Satoshi)
 
-case class GlobalBalance (onChain: CorrectedOnChainBalance, offChain: OffChainBalance, mutualClose: MutualCloseStatus) {
+case class GlobalBalance (onChain: CorrectedOnChainBalance, offChain: OffChainBalance) {
   val total: Btc = onChain.total + offChain.total
 }
 
@@ -444,7 +444,7 @@ class EclairImpl(appKit: Kit) extends Eclair with Logging {
     val start = System.currentTimeMillis()
     val bitcoinClient = new ExtendedBitcoinClient(appKit.bitcoin)
     for {
-      onchain <- CheckBalance.onChain(bitcoinClient)
+      onChain <- CheckBalance.computeOnChainBalance(bitcoinClient)
       channels <- channels_opt match {
         case Some(channels) => Future.successful(channels.values)
         case None => for {
@@ -453,13 +453,12 @@ class EclairImpl(appKit: Kit) extends Eclair with Logging {
         } yield channelsRes.collect { case RES_GETINFO(_, _, _, data: HasCommitments) => data }
       }
       knownPreimages = appKit.nodeParams.db.pendingCommands.listSettlementCommands().collect { case (channelId, cmd: CMD_FULFILL_HTLC) => (channelId, cmd.id) }.toSet
-      rawBalanceResult = CheckBalance.computeOffChainBalance(channels, knownPreimages)
-      balanceResults <- CheckBalance.prunePublishedTransactions(rawBalanceResult, bitcoinClient)
-      mutualCloseStatus <- CheckBalance.mutualCloseStatus(channels, bitcoinClient)
+      offChainRaw = CheckBalance.computeOffChainBalance(channels, knownPreimages)
+      offChainPruned <- CheckBalance.prunePublishedTransactions(offChainRaw, bitcoinClient)
     } yield {
       val end = System.currentTimeMillis()
       logger.info(s"computed balance in ${end - start}ms")
-      GlobalBalance(onchain, balanceResults, mutualCloseStatus)
+      GlobalBalance(onChain, offChainPruned)
     }
   }
 

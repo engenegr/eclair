@@ -2,7 +2,6 @@ package fr.acinq.eclair.balance
 
 import com.softwaremill.quicklens._
 import fr.acinq.bitcoin.{Btc, ByteVector32, SatoshiLong}
-import fr.acinq.eclair.MutualCloseStatus
 import fr.acinq.eclair.blockchain.bitcoind.rpc.ExtendedBitcoinClient
 import fr.acinq.eclair.channel.Helpers.Closing
 import fr.acinq.eclair.channel.Helpers.Closing.{CurrentRemoteClose, LocalClose, NextRemoteClose, RemoteClose}
@@ -33,36 +32,38 @@ object CheckBalance {
    * That's why we keep track of the id of each transaction that pays us any amount. It allows us to double check from
    * bitcoin core and remove any published transaction.
    */
-  case class PossiblyPublishedBalance(toLocal: Map[ByteVector32, Btc] = Map.empty, htlcs: Map[ByteVector32, Btc] = Map.empty, htlcsUnpublished: Btc = 0.sat) {
+  case class PossiblyPublishedMainBalance(toLocal: Map[ByteVector32, Btc] = Map.empty) {
+    val total: Btc = toLocal.values.map(_.toSatoshi).sum
+  }
+
+  case class PossiblyPublishedMainAndHtlcBalance(toLocal: Map[ByteVector32, Btc] = Map.empty, htlcs: Map[ByteVector32, Btc] = Map.empty, htlcsUnpublished: Btc = 0.sat) {
     val totalToLocal: Btc = toLocal.values.map(_.toSatoshi).sum
     val totalHtlcs: Btc = htlcs.values.map(_.toSatoshi).sum
     val total: Btc = totalToLocal + totalHtlcs + htlcsUnpublished
   }
 
   /**
-   * Mutual close transactions are always immediately published, and will be taken into account by bitcoin core, so we
-   * don't count them in the balance.
+   * Unless they got evicted, mutual close transactions will also appear in the on-chain balance and will disappear
+   * from here after on pruning.
    */
-  case class ClosingBalance(
-                             localCloseBalance: PossiblyPublishedBalance = PossiblyPublishedBalance(),
-                             remoteCloseBalance: PossiblyPublishedBalance = PossiblyPublishedBalance(),
-                             unknownCloseBalance: MainAndHtlcBalance = MainAndHtlcBalance()
-                           ) {
-    val total: Btc = localCloseBalance.total + remoteCloseBalance.total + unknownCloseBalance.total
+  case class ClosingBalance(localCloseBalance: PossiblyPublishedMainAndHtlcBalance = PossiblyPublishedMainAndHtlcBalance(),
+                            remoteCloseBalance: PossiblyPublishedMainAndHtlcBalance = PossiblyPublishedMainAndHtlcBalance(),
+                            mutualCloseBalance: PossiblyPublishedMainBalance = PossiblyPublishedMainBalance(),
+                            unknownCloseBalance: MainAndHtlcBalance = MainAndHtlcBalance()) {
+
+    val total: Btc = localCloseBalance.total + remoteCloseBalance.total + mutualCloseBalance.total + unknownCloseBalance.total
   }
 
   /**
    * The overall balance among all channels in all states.
    */
-  case class OffChainBalance(
-                            waitForFundingConfirmed: Btc = 0.sat,
-                            waitForFundingLocked: Btc = 0.sat,
-                            normal: MainAndHtlcBalance = MainAndHtlcBalance(),
-                            shutdown: MainAndHtlcBalance = MainAndHtlcBalance(),
-                            negotiating: Btc = 0.sat,
-                            closing: ClosingBalance = ClosingBalance(),
-                            waitForPublishFutureCommitment: Btc = 0.sat,
-                          ) {
+  case class OffChainBalance(waitForFundingConfirmed: Btc = 0.sat,
+                             waitForFundingLocked: Btc = 0.sat,
+                             normal: MainAndHtlcBalance = MainAndHtlcBalance(),
+                             shutdown: MainAndHtlcBalance = MainAndHtlcBalance(),
+                             negotiating: Btc = 0.sat,
+                             closing: ClosingBalance = ClosingBalance(),
+                             waitForPublishFutureCommitment: Btc = 0.sat) {
     val total: Btc = waitForFundingConfirmed + waitForFundingLocked + normal.total + shutdown.total + negotiating + closing.total + waitForPublishFutureCommitment
   }
 
@@ -80,7 +81,7 @@ object CheckBalance {
       .modify(_.htlcOut).using(_ + htlcIn + htlcOut)
   }
 
-  def updatePossiblyPublishedBalance(b1: PossiblyPublishedBalance): PossiblyPublishedBalance => PossiblyPublishedBalance = { b: PossiblyPublishedBalance =>
+  def updatePossiblyPublishedBalance(b1: PossiblyPublishedMainAndHtlcBalance): PossiblyPublishedMainAndHtlcBalance => PossiblyPublishedMainAndHtlcBalance = { b: PossiblyPublishedMainAndHtlcBalance =>
     b.modify(_.toLocal).using(_ ++ b1.toLocal)
       .modify(_.htlcs).using(_ ++ b1.htlcs)
       .modify(_.htlcsUnpublished).using(_ + b1.htlcsUnpublished)
@@ -91,7 +92,7 @@ object CheckBalance {
     c.remoteChanges.all.collectFirst { case u: UpdateFulfillHtlc if u.id == htlcId => true }.isDefined
   }
 
-  def computeLocalCloseBalance(c: Commitments, l: LocalClose, knownPreimages: Set[(ByteVector32, Long)]): PossiblyPublishedBalance = {
+  def computeLocalCloseBalance(c: Commitments, l: LocalClose, knownPreimages: Set[(ByteVector32, Long)]): PossiblyPublishedMainAndHtlcBalance = {
     import l._
     val toLocal = localCommitPublished.claimMainDelayedOutputTx.toSeq.map(c => c.tx.txid -> c.tx.txOut.head.amount.toBtc).toMap
     // incoming htlcs for which we have a preimage and the to-local delay has expired: we have published a claim tx that pays directly to our wallet
@@ -116,14 +117,14 @@ object CheckBalance {
     // all claim txs have possibly been published
     val htlcs = localCommitPublished.claimHtlcDelayedTxs
       .map(c => c.tx.txid -> c.tx.txOut.head.amount.toBtc).toMap
-    PossiblyPublishedBalance(
+    PossiblyPublishedMainAndHtlcBalance(
       toLocal = toLocal,
       htlcs = htlcs,
       htlcsUnpublished = htlcIn + htlcOut
     )
   }
 
-  def computeRemoteCloseBalance(c: Commitments, r: RemoteClose, knownPreimages: Set[(ByteVector32, Long)]): PossiblyPublishedBalance = {
+  def computeRemoteCloseBalance(c: Commitments, r: RemoteClose, knownPreimages: Set[(ByteVector32, Long)]): PossiblyPublishedMainAndHtlcBalance = {
     import r._
     val toLocal = if (c.channelVersion.paysDirectlyToWallet) {
       // If static remote key is enabled, the commit tx directly pays to our wallet
@@ -156,7 +157,7 @@ object CheckBalance {
     // all claim txs have possibly been published
     val htlcs = remoteCommitPublished.claimHtlcTxs.values.flatten
       .map(c => c.tx.txid -> c.tx.txOut.head.amount.toBtc).toMap
-    PossiblyPublishedBalance(
+    PossiblyPublishedMainAndHtlcBalance(
       toLocal = toLocal,
       htlcs = htlcs,
       htlcsUnpublished = htlcIn + htlcOut
@@ -190,7 +191,25 @@ object CheckBalance {
         case (r, d: DATA_CLOSING) =>
           Closing.isClosingTypeAlreadyKnown(d) match {
             case None if d.mutualClosePublished.nonEmpty && d.localCommitPublished.isEmpty && d.remoteCommitPublished.isEmpty && d.nextRemoteCommitPublished.isEmpty && d.revokedCommitPublished.isEmpty =>
-              r
+              // There can be multiple mutual close transactions for the same channel, but most of the time there will
+              // only be one. We use the last one in the list, which should be the one we have seen last in our local
+              // mempool. In the worst case scenario, there are several mutual closes and the one that made it to the
+              // mempool or the chain isn't the one we are keeping track of here. As a consequence the transaction won't
+              // be pruned and we will count twice the amount in the global (onChain + offChain) balance, until the
+              // mutual close tx gets deeply confirmed and the channel is removed.
+              val mutualClose = d.mutualClosePublished.last
+              val amount = mutualClose.toLocalOutput match {
+                case Some(outputInfo) => outputInfo.amount
+                case None =>
+                  // Normally this would mean that we don't actually have an output, but due to a migration
+                  // the data might not be accurate, see [[ChannelTypes0.migrateClosingTx]]
+                  // As a (hackish) workaround, we use the pubkeyscript to retrieve our output
+                  Transactions.findPubKeyScriptIndex(mutualClose.tx, d.commitments.localParams.defaultFinalScriptPubKey) match {
+                    case Right(outputIndex) => mutualClose.tx.txOut(outputIndex).amount
+                    case _ => 0.sat // either we don't have an output (below dust), or we have used a non-default pubkey script
+                  }
+              }
+              r.modify(_.closing.mutualCloseBalance.toLocal).using(_ + (mutualClose.tx.txid -> amount))
             case Some(localClose: LocalClose) => r.modify(_.closing.localCloseBalance).using(updatePossiblyPublishedBalance(computeLocalCloseBalance(d.commitments, localClose, knownPreimages)))
             case _ if d.remoteCommitPublished.nonEmpty || d.nextRemoteCommitPublished.nonEmpty =>
               // We have seen the remote commit, it may or may not have been confirmed. We may have published our own
@@ -217,7 +236,8 @@ object CheckBalance {
       txs: Iterable[Option[(ByteVector32, Int)]] <- Future.sequence((br.closing.localCloseBalance.toLocal.keys ++
         br.closing.localCloseBalance.htlcs.keys ++
         br.closing.remoteCloseBalance.toLocal.keys ++
-        br.closing.remoteCloseBalance.htlcs.keys)
+        br.closing.remoteCloseBalance.htlcs.keys ++
+        br.closing.mutualCloseBalance.toLocal.keys)
         .map(txid => bitcoinClient.getTxConfirmations(txid).map(_ map { confirmations => txid -> confirmations })))
       txMap: Map[ByteVector32, Int] = txs.flatten.toMap
     } yield {
@@ -226,50 +246,9 @@ object CheckBalance {
           _.closing.localCloseBalance.toLocal,
           _.closing.localCloseBalance.htlcs,
           _.closing.remoteCloseBalance.toLocal,
-          _.closing.remoteCloseBalance.htlcs)
+          _.closing.remoteCloseBalance.htlcs,
+          _.closing.mutualCloseBalance.toLocal)
         .using(map => map.filterNot { case (txid, _) => txMap.contains(txid) })
-    }
-  }
-
-
-  def mutualCloseStatus(channels: Iterable[HasCommitments], bitcoinClient: ExtendedBitcoinClient)(implicit ex: ExecutionContext): Future[MutualCloseStatus] = {
-    for {
-      mutualCloseStatuses: Iterable[MutualCloseStatus] <- Future.sequence(channels
-        .collect {
-          case DATA_CLOSING(commitments, _, _, _, mutualClosePublished, None, None, None, None, Nil) =>
-            // if all other closing types are empty, mutualClosePublished must be non empty
-            for {
-              res: Seq[Option[Int]] <- Future.sequence(mutualClosePublished.map(closingTx => bitcoinClient.getTxConfirmations(closingTx.tx.txid)))
-              confirmations = res.flatten.headOption
-            } yield {
-              // TODO: this is an approximation, we use the first closing tx in the list, which is not necessarily the one that will be used
-              val mutualClose = mutualClosePublished.head
-              val amount = mutualClose.toLocalOutput match {
-                case Some(outputInfo) => outputInfo.amount
-                case None =>
-                  // Normally this would mean that we don't actually have an output, but due to a migration
-                  // the data might not be accurate, see [[ChannelTypes0.migrateClosingTx]]
-                  // As a (hackish) workaround, we use the pubkeyscript to retrieve our output
-                  Transactions.findPubKeyScriptIndex(mutualClose.tx, commitments.localParams.defaultFinalScriptPubKey) match {
-                    case Right(outputIndex) => mutualClose.tx.txOut(outputIndex).amount
-                    case _ => 0.sat // either we don't have an output (below dust), or we have used a non-default pubkey script
-                  }
-              }
-              confirmations match {
-                case Some(conf) if conf > 0 => MutualCloseStatus(unpublished = 0.sat, unconfirmed = 0.sat, confirmed = amount)
-                case Some(0) => MutualCloseStatus(unpublished = 0.sat, unconfirmed = amount, confirmed = 0.sat)
-                case None => MutualCloseStatus(unpublished = amount, unconfirmed = 0.sat, confirmed = 0.sat)
-              }
-            }
-        })
-    } yield {
-      mutualCloseStatuses.foldLeft(MutualCloseStatus(0.sat, 0.sat, 0.sat)) {
-        case (a, b) => MutualCloseStatus(
-          unpublished = a.unpublished + b.unpublished,
-          unconfirmed = a.unconfirmed + b.unconfirmed,
-          confirmed = a.confirmed + b.confirmed
-        )
-      }
     }
   }
 
@@ -284,10 +263,10 @@ object CheckBalance {
    * Confirmed swap-in transactions are counted, because we can spend them, but we keep track of what we still owe to our
    * users.
    */
-  def onChain(bitcoinClient: ExtendedBitcoinClient)(implicit ec: ExecutionContext): Future[CorrectedOnChainBalance] = for {
+  def computeOnChainBalance(bitcoinClient: ExtendedBitcoinClient)(implicit ec: ExecutionContext): Future[CorrectedOnChainBalance] = for {
     utxos <- bitcoinClient.listUnspent()
     detailed = utxos.foldLeft(DetailedBalance()) {
-     case (total, utxo) if utxo.confirmations > 0 => total.modify(_.confirmed).using(_ + utxo.amount)
+      case (total, utxo) if utxo.confirmations > 0 => total.modify(_.confirmed).using(_ + utxo.amount)
       case (total, utxo) if utxo.confirmations == 0 => total.modify(_.unconfirmed).using(_ + utxo.amount)
     }
   } yield CorrectedOnChainBalance(detailed.confirmed, detailed.unconfirmed)

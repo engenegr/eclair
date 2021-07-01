@@ -1,7 +1,7 @@
 package fr.acinq.eclair.balance
 
 import fr.acinq.bitcoin.{ByteVector32, SatoshiLong}
-import fr.acinq.eclair.balance.CheckBalance.{OffChainBalance, ClosingBalance, PossiblyPublishedBalance}
+import fr.acinq.eclair.balance.CheckBalance.{ClosingBalance, OffChainBalance, PossiblyPublishedMainAndHtlcBalance, PossiblyPublishedMainBalance}
 import fr.acinq.eclair.blockchain.bitcoind.rpc.ExtendedBitcoinClient
 import fr.acinq.eclair.db.jdbc.JdbcUtils.ExtendedResultSet._
 import fr.acinq.eclair.db.pg.PgUtils.using
@@ -42,8 +42,8 @@ class CheckBalanceSpec extends AnyFunSuite {
 
   test("tx pruning") {
 
-    val txids = (for (_ <- 0 until 20) yield randomBytes32).toList
-    val knownTxids = Set(txids(1), txids(3), txids(4), txids(6), txids(9), txids(12))
+    val txids = (for (_ <- 0 until 20) yield randomBytes32()).toList
+    val knownTxids = Set(txids(1), txids(3), txids(4), txids(6), txids(9), txids(12), txids(13))
 
     val bitcoinClient = new ExtendedBitcoinClient(null) {
       /** Get the number of confirmations of a given transaction. */
@@ -53,7 +53,7 @@ class CheckBalanceSpec extends AnyFunSuite {
 
     val bal1 = OffChainBalance(
       closing = ClosingBalance(
-        localCloseBalance = PossiblyPublishedBalance(
+        localCloseBalance = PossiblyPublishedMainAndHtlcBalance(
           toLocal = Map(
             txids(0) -> 1000.sat,
             txids(1) -> 1000.sat,
@@ -63,7 +63,7 @@ class CheckBalanceSpec extends AnyFunSuite {
             txids(4) -> 1000.sat,
             txids(5) -> 1000.sat)
         ),
-        remoteCloseBalance = PossiblyPublishedBalance(
+        remoteCloseBalance = PossiblyPublishedMainAndHtlcBalance(
           toLocal = Map(
             txids(6) -> 1000.sat,
             txids(7) -> 1000.sat,
@@ -73,7 +73,14 @@ class CheckBalanceSpec extends AnyFunSuite {
             txids(10) -> 1000.sat,
             txids(11) -> 1000.sat,
             txids(12) -> 1000.sat),
-        ))
+        ),
+        mutualCloseBalance = PossiblyPublishedMainBalance(
+          toLocal = Map(
+            txids(13) -> 1000.sat,
+            txids(14) -> 1000.sat
+          )
+        )
+      )
     )
 
     val bal2 = Await.result(CheckBalance.prunePublishedTransactions(bal1, bitcoinClient)(ExecutionContext.Implicits.global), 10 seconds)
@@ -81,20 +88,25 @@ class CheckBalanceSpec extends AnyFunSuite {
 
     assert(bal2 == OffChainBalance(
       closing = ClosingBalance(
-        localCloseBalance = PossiblyPublishedBalance(
+        localCloseBalance = PossiblyPublishedMainAndHtlcBalance(
           toLocal = Map(
             txids(0) -> 1000.sat,
             txids(2) -> 1000.sat),
           htlcs = Map(
             txids(5) -> 1000.sat)
         ),
-        remoteCloseBalance = PossiblyPublishedBalance(
+        remoteCloseBalance = PossiblyPublishedMainAndHtlcBalance(
           toLocal = Map(
             txids(7) -> 1000.sat,
             txids(8) -> 1000.sat),
           htlcs = Map(
             txids(10) -> 1000.sat,
             txids(11) -> 1000.sat),
+        ),
+        mutualCloseBalance = PossiblyPublishedMainBalance(
+          toLocal = Map(
+            txids(14) -> 1000.sat
+          )
         )))
     )
   }
