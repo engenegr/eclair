@@ -159,7 +159,7 @@ class ExtendedBitcoinClient(val rpcClient: BitcoinJsonRPCClient) extends Logging
   def unlockOutpoints(outPoints: Seq[OutPoint])(implicit ec: ExecutionContext): Future[Boolean] = {
     // we unlock utxos one by one and not as a list as it would fail at the first utxo that is not actually locked and the rest would not be processed
     val futures = outPoints
-      .map(outPoint => UnlockOutpointUtxo(outPoint.txid, outPoint.index))
+      .map(outPoint => UnlockOutpoint(outPoint.txid, outPoint.index))
       .map(utxo => rpcClient
         .invoke("lockunspent", true, List(utxo))
         .mapTo[JBool]
@@ -336,7 +336,7 @@ object ExtendedBitcoinClient {
    */
   case class MempoolTx(txid: ByteVector32, vsize: Long, weight: Long, replaceable: Boolean, fees: Satoshi, ancestorCount: Int, ancestorFees: Satoshi, descendantCount: Int, descendantFees: Satoshi)
 
-  case class UnlockOutpointUtxo(txid: ByteVector32, vout: Long)
+  case class UnlockOutpoint(txid: ByteVector32, vout: Long)
 
   case class Utxo(txid: ByteVector32, amount: MilliBtc, confirmations: Long, safe: Boolean, label_opt: Option[String])
 
