@@ -31,7 +31,7 @@ import fr.acinq.eclair.router.Router.RouteResponse
 import fr.acinq.eclair.transactions.DirectedHtlc
 import fr.acinq.eclair.transactions.Transactions.{ClaimHtlcTx, ClosingTx, HtlcSuccessTx, HtlcTimeoutTx, InputInfo, TransactionWithInputInfo}
 import fr.acinq.eclair.wire.protocol._
-import fr.acinq.eclair.{CltvExpiry, CltvExpiryDelta, Features, MilliSatoshi, ShortChannelId, UInt64}
+import fr.acinq.eclair.{CltvExpiry, CltvExpiryDelta, Features, GlobalBalance, MilliSatoshi, ShortChannelId, UInt64}
 import org.json4s.JsonAST._
 import org.json4s.{CustomKeySerializer, CustomSerializer, DefaultFormats, Extraction, JsonAST, ShortTypeHints, TypeHints, jackson}
 import scodec.bits.ByteVector
@@ -382,6 +382,14 @@ class OriginSerializer extends CustomSerializer[Origin](_ => ( {
   })
 }))
 
+class GlobalBalanceSerializer extends CustomSerializer[GlobalBalance](_ => ( {
+  null
+}, {
+  case o: GlobalBalance =>
+    val formats = DefaultFormats + new ByteVector32KeySerializer + new BtcSerializer + new SatoshiSerializer
+    JObject(JField("total", JDecimal(o.total.toDouble))) merge Extraction.decompose(o)(formats)
+}))
+
 case class CustomTypeHints(custom: Map[Class[_], String]) extends TypeHints {
   val reverse: Map[String, Class[_]] = custom.map(_.swap)
 
@@ -441,7 +449,6 @@ object JsonSupport extends Json4sSupport {
   implicit val formats = (org.json4s.DefaultFormats +
     new ByteVectorSerializer +
     new ByteVector32Serializer +
-    new ByteVector32KeySerializer +
     new ByteVector64Serializer +
     new ChannelEventSerializer +
     new UInt64Serializer +
@@ -477,6 +484,7 @@ object JsonSupport extends Json4sSupport {
     new JavaUUIDSerializer +
     new FeaturesSerializer +
     new OriginSerializer +
+    new GlobalBalanceSerializer +
     CustomTypeHints.incomingPaymentStatus +
     CustomTypeHints.outgoingPaymentStatus +
     CustomTypeHints.paymentEvent +

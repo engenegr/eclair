@@ -59,18 +59,8 @@ case class TimestampQueryFilters(from: Long, to: Long)
 
 case class MutualCloseStatus(unpublished: Satoshi, unconfirmed: Satoshi, confirmed: Satoshi)
 
-case class GlobalBalance private(total: Btc, onchain: CorrectedOnchainBalance, offchain: BalanceResult, mutualClose: MutualCloseStatus)
-
-object GlobalBalance {
-
-  private def apply(total: Btc, onchain: CorrectedOnchainBalance, offchain: BalanceResult, mutualClose: MutualCloseStatus): GlobalBalance = ???
-
-  def apply(onchain: CorrectedOnchainBalance, offchain: BalanceResult, mutualClose: MutualCloseStatus): GlobalBalance = new GlobalBalance(
-    total = onchain.total + offchain.total,
-    onchain = onchain,
-    offchain = offchain,
-    mutualClose = mutualClose
-  )
+case class GlobalBalance (onchain: CorrectedOnchainBalance, offchain: BalanceResult, mutualClose: MutualCloseStatus) {
+  val total: Btc = onchain.total + offchain.total
 }
 
 case class SignedMessage(nodeId: PublicKey, message: String, signature: ByteVector)

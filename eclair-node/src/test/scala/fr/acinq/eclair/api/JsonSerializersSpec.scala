@@ -16,9 +16,11 @@
 
 package fr.acinq.eclair.api
 
-import fr.acinq.bitcoin.{ByteVector32, OutPoint, Satoshi, Transaction, TxOut}
+import fr.acinq.bitcoin.{Btc, ByteVector32, OutPoint, Satoshi, Transaction, TxOut}
 import fr.acinq.eclair._
 import fr.acinq.eclair.api.serde._
+import fr.acinq.eclair.balance.CheckBalance
+import fr.acinq.eclair.balance.CheckBalance.{ClosingBalance, MainAndHtlcBalance, PossiblyPublishedBalance}
 import fr.acinq.eclair.channel.Origin
 import fr.acinq.eclair.payment.{PaymentRequest, PaymentSettlingOnChain}
 import fr.acinq.eclair.transactions.Transactions._
@@ -141,6 +143,24 @@ class JsonSerializersSpec extends AnyFunSuite with Matchers {
     val ref = "lntb1pst2q8xpp5qysan6j5xeq97tytxf7pfr0n75na8rztqhh03glmlgsqsyuqzgnqdqqxqrrss9qy9qsqsp5qq67gcxrn2drj5p0lc6p8wgdpqwxnc2h4s9kra5489q0fqsvhumsrzjqfqnj4upt5z6hdludky9vgk4ehzmwu2dk9rcevzczw5ywstehq79c83xr5qqqkqqqqqqqqlgqqqqqeqqjqrzjqwfn3p9278ttzzpe0e00uhyxhned3j5d9acqak5emwfpflp8z2cng838tqqqqxgqqqqqqqlgqqqqqeqqjqkxs4223x2r6sat65asfp0k2pze2rswe9np9vq08waqvsp832ffgymzgx8hgzejasesfxwcw6jj93azwq9klwuzmef3llns3n95pztgqpawp7an"
     val pr = PaymentRequest.read(ref)
     JsonSupport.serialization.write(pr)(JsonSupport.formats) shouldBe """{"prefix":"lntb","timestamp":1622474982,"nodeId":"03e89e4c3d41dc5332c2fb6cc66d12bfb9257ba681945a242f27a08d5ad210d891","serialized":"lntb1pst2q8xpp5qysan6j5xeq97tytxf7pfr0n75na8rztqhh03glmlgsqsyuqzgnqdqqxqrrss9qy9qsqsp5qq67gcxrn2drj5p0lc6p8wgdpqwxnc2h4s9kra5489q0fqsvhumsrzjqfqnj4upt5z6hdludky9vgk4ehzmwu2dk9rcevzczw5ywstehq79c83xr5qqqkqqqqqqqqlgqqqqqeqqjqrzjqwfn3p9278ttzzpe0e00uhyxhned3j5d9acqak5emwfpflp8z2cng838tqqqqxgqqqqqqqlgqqqqqeqqjqkxs4223x2r6sat65asfp0k2pze2rswe9np9vq08waqvsp832ffgymzgx8hgzejasesfxwcw6jj93azwq9klwuzmef3llns3n95pztgqpawp7an","description":"","paymentHash":"0121d9ea5436405f2c8b327c148df3f527d38c4b05eef8a3fbfa200813801226","expiry":3600,"features":{"activated":{"var_onion_optin":"optional","payment_secret":"optional","basic_mpp":"optional"},"unknown":[]},"routingInfo":[[{"nodeId":"02413957815d05abb7fc6d885622d5cdc5b7714db1478cb05813a8474179b83c5c","shortChannelId":"1975837x88x0","feeBase":1000,"feeProportionalMillionths":100,"cltvExpiryDelta":144}],[{"nodeId":"03933884aaf1d6b108397e5efe5c86bcf2d8ca8d2f700eda99db9214fc2712b134","shortChannelId":"1976152x25x0","feeBase":1000,"feeProportionalMillionths":100,"cltvExpiryDelta":144}]]}"""
+  }
+
+  test("GlobalBalance serializer") {
+    import fr.acinq.bitcoin.SatoshiLong
+    val gb = GlobalBalance(
+      onchain = CheckBalance.CorrectedOnchainBalance(Btc(0.5), Btc(0.05)),
+      offchain = CheckBalance.BalanceResult(normal = MainAndHtlcBalance(
+        toLocal = Btc(0.2),
+        htlcOut = Btc(0.05)
+      ),
+        closing = ClosingBalance(localCloseBalance = PossiblyPublishedBalance(
+          toLocal = Map(ByteVector32(hex"4d176ad844c363bed59edf81962b008faa6194c3b3757ffcd26ba60f95716db2") -> Btc(0.1)),
+          htlcs = Map(ByteVector32(hex"94b70cec5a98d67d17c6e3de5c7697f8a6cab4f698df91e633ce35efa3574d71") -> Btc(0.03), ByteVector32(hex"a844edd41ce8503864f3c95d89d850b177a09d7d35e950a7d27c14abb63adb13") -> Btc(0.06)),
+          htlcsUnpublished = Btc(0.01)
+        ))),
+      mutualClose = MutualCloseStatus(1.sat, 2.sat, 3.sat)
+    )
+    JsonSupport.serialization.write(gb)(JsonSupport.formats) shouldBe """{"total":1.0,"onchain":{"confirmed":0.5,"unconfirmed":0.05},"offchain":{"waitForFundingConfirmed":0.0,"waitForFundingLocked":0.0,"normal":{"toLocal":0.2,"htlcOut":0.05},"shutdown":{"toLocal":0.0,"htlcOut":0.0},"negotiating":0.0,"closing":{"localCloseBalance":{"toLocal":{"4d176ad844c363bed59edf81962b008faa6194c3b3757ffcd26ba60f95716db2":0.1},"htlcs":{"94b70cec5a98d67d17c6e3de5c7697f8a6cab4f698df91e633ce35efa3574d71":0.03,"a844edd41ce8503864f3c95d89d850b177a09d7d35e950a7d27c14abb63adb13":0.06},"htlcsUnpublished":0.01},"remoteCloseBalance":{"toLocal":{},"htlcs":{},"htlcsUnpublished":0.0},"unknownCloseBalance":{"toLocal":0.0,"htlcOut":0.0}},"waitForPublishFutureCommitment":0.0},"mutualClose":{"unpublished":1,"unconfirmed":2,"confirmed":3}}"""
   }
 
   test("type hints") {
