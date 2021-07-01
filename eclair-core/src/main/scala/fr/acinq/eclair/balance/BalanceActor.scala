@@ -4,10 +4,12 @@ import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, Behavior}
 import fr.acinq.bitcoin.ByteVector32
 import fr.acinq.eclair.balance.BalanceActor._
+import fr.acinq.eclair.balance.CheckBalance.GlobalBalance
 import fr.acinq.eclair.balance.Monitoring.{Metrics, Tags}
 import fr.acinq.eclair.blockchain.bitcoind.rpc.ExtendedBitcoinClient
 import fr.acinq.eclair.blockchain.bitcoind.rpc.ExtendedBitcoinClient.Utxo
-import fr.acinq.eclair.{Eclair, GlobalBalance}
+import fr.acinq.eclair.channel.HasCommitments
+import fr.acinq.eclair.db.PendingCommandsDb
 import grizzled.slf4j.Logger
 import org.json4s.JsonAST.JInt
 
@@ -20,16 +22,17 @@ object BalanceActor {
   // @formatter:off
   sealed trait Command
   private final case object TickBalance extends Command
+  final case class GetGlobalBalance(replyTo: ActorRef[Future[GlobalBalance]], channels: Map[ByteVector32, HasCommitments]) extends Command
   private final case class WrappedChannels(wrapped: ChannelsListener.GetChannelsResponse) extends Command
   private final case class WrappedGlobalBalance(wrapped: Try[GlobalBalance]) extends Command
   private final case class WrappedUtxoInfo(wrapped: Try[UtxoInfo]) extends Command
   // @formatter:on
 
-  def apply(extendedBitcoinClient: ExtendedBitcoinClient, eclair: Eclair, channelsListener: ActorRef[ChannelsListener.GetChannels], interval: FiniteDuration)(implicit ec: ExecutionContext): Behavior[Command] = {
+  def apply(pendingCommandsDb: PendingCommandsDb, extendedBitcoinClient: ExtendedBitcoinClient, channelsListener: ActorRef[ChannelsListener.GetChannels], interval: FiniteDuration)(implicit ec: ExecutionContext): Behavior[Command] = {
     Behaviors.setup { context =>
       Behaviors.withTimers { timers =>
         timers.startTimerWithFixedDelay(TickBalance, interval)
-        new BalanceActor(context, extendedBitcoinClient, eclair, channelsListener).apply(refBalance_opt = None)
+        new BalanceActor(context, pendingCommandsDb, extendedBitcoinClient, channelsListener).apply(refBalance_opt = None)
       }
     }
   }
@@ -60,8 +63,8 @@ object BalanceActor {
 }
 
 private class BalanceActor(context: ActorContext[Command],
+                           pendingCommandsDb: PendingCommandsDb,
                            extendedBitcoinClient: ExtendedBitcoinClient,
-                           eclair: Eclair,
                            channelsListener: ActorRef[ChannelsListener.GetChannels])(implicit ec: ExecutionContext) {
 
   private val log = context.log
@@ -73,8 +76,7 @@ private class BalanceActor(context: ActorContext[Command],
       context.pipeToSelf(checkUtxos(extendedBitcoinClient))(WrappedUtxoInfo)
       Behaviors.same
     case WrappedChannels(res) =>
-      val self = context.self
-      eclair.globalBalance(Some(res.channels))(30 seconds).onComplete(res => self ! WrappedGlobalBalance(res))
+      context.pipeToSelf(CheckBalance.computeGlobalBalance(res.channels, pendingCommandsDb, extendedBitcoinClient))(WrappedGlobalBalance)
       Behaviors.same
     case WrappedGlobalBalance(res) =>
       res match {
@@ -109,6 +111,9 @@ private class BalanceActor(context: ActorContext[Command],
           log.warn("could not compute balance: ", t)
           Behaviors.same
       }
+    case GetGlobalBalance(replyTo, channels) =>
+      replyTo ! CheckBalance.computeGlobalBalance(channels, pendingCommandsDb, extendedBitcoinClient)
+      Behaviors.same
     case WrappedUtxoInfo(res) =>
       res match {
         case Success(UtxoInfo(utxos: Seq[Utxo], ancestorCount: Map[ByteVector32, Long])) =>

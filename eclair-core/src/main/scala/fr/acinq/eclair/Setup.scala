@@ -26,7 +26,7 @@ import com.softwaremill.sttp.okhttp.OkHttpFutureBackend
 import fr.acinq.bitcoin.{Block, ByteVector32, Satoshi}
 import fr.acinq.eclair.Setup.Seeds
 import fr.acinq.eclair.balance.{BalanceActor, ChannelsListener}
-import fr.acinq.eclair.blockchain.bitcoind.rpc.{BasicBitcoinJsonRPCClient, BatchingBitcoinJsonRPCClient, BitcoinJsonRPCClient, ExtendedBitcoinClient}
+import fr.acinq.eclair.blockchain.bitcoind.rpc.{BasicBitcoinJsonRPCClient, BatchingBitcoinJsonRPCClient, ExtendedBitcoinClient}
 import fr.acinq.eclair.blockchain.bitcoind.zmq.ZMQActor
 import fr.acinq.eclair.blockchain.bitcoind.{BitcoinCoreWallet, ZmqWatcher}
 import fr.acinq.eclair.blockchain.fee.{ConstantFeeProvider, _}
@@ -288,9 +288,10 @@ class Setup(val datadir: File,
       paymentInitiator = system.actorOf(SimpleSupervisor.props(PaymentInitiator.props(nodeParams, PaymentInitiator.SimplePaymentFactory(nodeParams, router, register)), "payment-initiator", SupervisorStrategy.Restart))
       _ = for (i <- 0 until config.getInt("autoprobe-count")) yield system.actorOf(SimpleSupervisor.props(Autoprobe.props(nodeParams, router, paymentInitiator), s"payment-autoprobe-$i", SupervisorStrategy.Restart))
 
+      balanceActor = system.spawn(BalanceActor(nodeParams.db.pendingCommands, extendedBitcoinClient, channelsListener, nodeParams.balanceCheckInterval), name = "balance-actor")
+
       kit = Kit(
         nodeParams = nodeParams,
-        bitcoin = bitcoin,
         system = system,
         watcher = watcher,
         paymentHandler = paymentHandler,
@@ -300,9 +301,9 @@ class Setup(val datadir: File,
         switchboard = switchboard,
         paymentInitiator = paymentInitiator,
         server = server,
+        channelsListener = channelsListener,
+        balanceActor = balanceActor,
         wallet = wallet)
-
-      _ = system.spawn(BalanceActor(extendedBitcoinClient, new EclairImpl(kit), channelsListener, nodeParams.balanceCheckInterval), name = "balance-actor")
 
       zmqBlockTimeout = after(5 seconds, using = system.scheduler)(Future.failed(BitcoinZMQConnectionTimeoutException))
       zmqTxTimeout = after(5 seconds, using = system.scheduler)(Future.failed(BitcoinZMQConnectionTimeoutException))
@@ -359,7 +360,6 @@ object Setup {
 }
 
 case class Kit(nodeParams: NodeParams,
-               bitcoin: BitcoinJsonRPCClient,
                system: ActorSystem,
                watcher: typed.ActorRef[ZmqWatcher.Command],
                paymentHandler: ActorRef,
@@ -369,6 +369,8 @@ case class Kit(nodeParams: NodeParams,
                switchboard: ActorRef,
                paymentInitiator: ActorRef,
                server: ActorRef,
+               channelsListener: typed.ActorRef[ChannelsListener.Command],
+               balanceActor: typed.ActorRef[BalanceActor.Command],
                wallet: EclairWallet)
 
 object Kit {

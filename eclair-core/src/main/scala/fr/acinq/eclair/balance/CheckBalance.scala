@@ -6,6 +6,7 @@ import fr.acinq.eclair.blockchain.bitcoind.rpc.ExtendedBitcoinClient
 import fr.acinq.eclair.channel.Helpers.Closing
 import fr.acinq.eclair.channel.Helpers.Closing.{CurrentRemoteClose, LocalClose, NextRemoteClose, RemoteClose}
 import fr.acinq.eclair.channel._
+import fr.acinq.eclair.db.PendingCommandsDb
 import fr.acinq.eclair.transactions.DirectedHtlc.{incoming, outgoing}
 import fr.acinq.eclair.transactions.Transactions
 import fr.acinq.eclair.transactions.Transactions.{ClaimHtlcSuccessTx, ClaimHtlcTimeoutTx, HtlcSuccessTx, HtlcTimeoutTx}
@@ -270,5 +271,16 @@ object CheckBalance {
       case (total, utxo) if utxo.confirmations == 0 => total.modify(_.unconfirmed).using(_ + utxo.amount)
     }
   } yield CorrectedOnChainBalance(detailed.confirmed, detailed.unconfirmed)
+
+  case class GlobalBalance (onChain: CorrectedOnChainBalance, offChain: OffChainBalance) {
+    val total: Btc = onChain.total + offChain.total
+  }
+
+  def computeGlobalBalance(channels: Map[ByteVector32, HasCommitments], pendingCommandsDb: PendingCommandsDb, bitcoinClient: ExtendedBitcoinClient)(implicit ec: ExecutionContext): Future[GlobalBalance] = for {
+    onChain <- CheckBalance.computeOnChainBalance(bitcoinClient)
+    knownPreimages = pendingCommandsDb.listSettlementCommands().collect { case (channelId, cmd: CMD_FULFILL_HTLC) => (channelId, cmd.id) }.toSet
+    offChainRaw = CheckBalance.computeOffChainBalance(channels.values, knownPreimages)
+    offChainPruned <- CheckBalance.prunePublishedTransactions(offChainRaw, bitcoinClient)
+  } yield GlobalBalance(onChain, offChainPruned)
 
 }

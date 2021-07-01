@@ -17,7 +17,7 @@
 package fr.acinq.eclair
 
 import akka.actor.ActorRef
-import akka.actor.typed.scaladsl.adapter.actorRefAdapter
+import akka.actor.typed.scaladsl.adapter.{ClassicActorRefOps, actorRefAdapter}
 import akka.testkit.TestProbe
 import akka.util.Timeout
 import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
@@ -62,9 +62,10 @@ class EclairImplSpec extends TestKitBaseClass with FixtureAnyFunSuiteLike with I
     val switchboard = TestProbe()
     val paymentInitiator = TestProbe()
     val server = TestProbe()
+    val channelsListener = TestProbe()
+    val balanceActor = TestProbe()
     val kit = Kit(
       TestConstants.Alice.nodeParams,
-      bitcoin = null,
       system,
       watcher.ref,
       paymentHandler.ref,
@@ -74,6 +75,8 @@ class EclairImplSpec extends TestKitBaseClass with FixtureAnyFunSuiteLike with I
       switchboard.ref,
       paymentInitiator.ref,
       server.ref,
+      channelsListener.ref.toTyped,
+      balanceActor.ref.toTyped,
       new TestWallet()
     )
 

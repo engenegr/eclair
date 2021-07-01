@@ -17,17 +17,18 @@
 package fr.acinq.eclair
 
 import akka.actor.ActorRef
+import akka.actor.typed.scaladsl.AskPattern.Askable
+import akka.actor.typed.scaladsl.adapter.ClassicSchedulerOps
 import akka.pattern._
 import akka.util.Timeout
 import fr.acinq.bitcoin.Crypto.PublicKey
-import fr.acinq.bitcoin.{Btc, ByteVector32, ByteVector64, Crypto, Satoshi}
+import fr.acinq.bitcoin.{ByteVector32, ByteVector64, Crypto, Satoshi}
 import fr.acinq.eclair.TimestampQueryFilters._
-import fr.acinq.eclair.balance.CheckBalance
-import fr.acinq.eclair.balance.CheckBalance.{OffChainBalance, CorrectedOnChainBalance}
+import fr.acinq.eclair.balance.CheckBalance.GlobalBalance
+import fr.acinq.eclair.balance.{BalanceActor, ChannelsListener}
 import fr.acinq.eclair.blockchain.OnChainBalance
 import fr.acinq.eclair.blockchain.bitcoind.BitcoinCoreWallet
 import fr.acinq.eclair.blockchain.bitcoind.BitcoinCoreWallet.WalletTransaction
-import fr.acinq.eclair.blockchain.bitcoind.rpc.ExtendedBitcoinClient
 import fr.acinq.eclair.blockchain.fee.{FeeratePerByte, FeeratePerKw}
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.db.AuditDb.{NetworkFee, Stats}
@@ -56,10 +57,6 @@ case class GetInfoResponse(version: String, nodeId: PublicKey, alias: String, co
 case class AuditResponse(sent: Seq[PaymentSent], received: Seq[PaymentReceived], relayed: Seq[PaymentRelayed])
 
 case class TimestampQueryFilters(from: Long, to: Long)
-
-case class GlobalBalance (onChain: CorrectedOnChainBalance, offChain: OffChainBalance) {
-  val total: Btc = onChain.total + offChain.total
-}
 
 case class SignedMessage(nodeId: PublicKey, message: String, signature: ByteVector)
 
@@ -157,7 +154,7 @@ trait Eclair {
 
   def onChainTransactions(count: Int, skip: Int): Future[Iterable[WalletTransaction]]
 
-  def globalBalance(channels_opt: Option[Map[ByteVector32, HasCommitments]])(implicit timeout: Timeout): Future[GlobalBalance]
+  def globalBalance()(implicit timeout: Timeout): Future[GlobalBalance]
 
   def signMessage(message: ByteVector): SignedMessage
 
@@ -438,26 +435,11 @@ class EclairImpl(appKit: Kit) extends Eclair with Logging {
   override def usableBalances()(implicit timeout: Timeout): Future[Iterable[UsableBalance]] =
     (appKit.relayer ? GetOutgoingChannels()).mapTo[OutgoingChannels].map(_.channels.map(_.toUsableBalance))
 
-  override def globalBalance(channels_opt: Option[Map[ByteVector32, HasCommitments]])(implicit timeout: Timeout): Future[GlobalBalance] = {
-    val start = System.currentTimeMillis()
-    val bitcoinClient = new ExtendedBitcoinClient(appKit.bitcoin)
+  override def globalBalance()(implicit timeout: Timeout): Future[GlobalBalance] = {
     for {
-      onChain <- CheckBalance.computeOnChainBalance(bitcoinClient)
-      channels <- channels_opt match {
-        case Some(channels) => Future.successful(channels.values)
-        case None => for {
-          channelIds <- (appKit.register ? Symbol("channels")).mapTo[Map[ByteVector32, ActorRef]].map(_.keys)
-          channelsRes <- Future.sequence(channelIds.map(channelId => sendToChannel[RES_GETINFO](Left(channelId), CMD_GETINFO(ActorRef.noSender))))
-        } yield channelsRes.collect { case RES_GETINFO(_, _, _, data: HasCommitments) => data }
-      }
-      knownPreimages = appKit.nodeParams.db.pendingCommands.listSettlementCommands().collect { case (channelId, cmd: CMD_FULFILL_HTLC) => (channelId, cmd.id) }.toSet
-      offChainRaw = CheckBalance.computeOffChainBalance(channels, knownPreimages)
-      offChainPruned <- CheckBalance.prunePublishedTransactions(offChainRaw, bitcoinClient)
-    } yield {
-      val end = System.currentTimeMillis()
-      logger.info(s"computed balance in ${end - start}ms")
-      GlobalBalance(onChain, offChainPruned)
-    }
+      ChannelsListener.GetChannelsResponse(channels) <- appKit.channelsListener.ask(ref => ChannelsListener.GetChannels(ref))(timeout, appKit.system.scheduler.toTyped)
+      globalBalance <- appKit.balanceActor.ask(res => BalanceActor.GetGlobalBalance(res, channels))(timeout, appKit.system.scheduler.toTyped).flatten
+    } yield globalBalance
   }
 
   override def signMessage(message: ByteVector): SignedMessage = {

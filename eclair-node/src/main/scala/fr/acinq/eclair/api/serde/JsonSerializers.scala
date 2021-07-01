@@ -21,6 +21,7 @@ import de.heikoseeberger.akkahttpjson4s.Json4sSupport
 import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
 import fr.acinq.bitcoin.{Btc, ByteVector32, ByteVector64, OutPoint, Satoshi, Transaction}
 import fr.acinq.eclair.ApiTypes.ChannelIdentifier
+import fr.acinq.eclair.balance.CheckBalance.GlobalBalance
 import fr.acinq.eclair.blockchain.fee.FeeratePerKw
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.crypto.ShaChain
@@ -29,11 +30,11 @@ import fr.acinq.eclair.db.{IncomingPaymentStatus, OutgoingPaymentStatus}
 import fr.acinq.eclair.payment._
 import fr.acinq.eclair.router.Router.RouteResponse
 import fr.acinq.eclair.transactions.DirectedHtlc
-import fr.acinq.eclair.transactions.Transactions.{ClaimHtlcTx, ClosingTx, HtlcSuccessTx, HtlcTimeoutTx, InputInfo, TransactionWithInputInfo}
+import fr.acinq.eclair.transactions.Transactions._
 import fr.acinq.eclair.wire.protocol._
-import fr.acinq.eclair.{CltvExpiry, CltvExpiryDelta, Features, GlobalBalance, MilliSatoshi, ShortChannelId, UInt64}
+import fr.acinq.eclair.{CltvExpiry, CltvExpiryDelta, Features, MilliSatoshi, ShortChannelId, UInt64}
 import org.json4s.JsonAST._
-import org.json4s.{CustomKeySerializer, CustomSerializer, DefaultFormats, Extraction, JsonAST, ShortTypeHints, TypeHints, jackson}
+import org.json4s.{CustomKeySerializer, CustomSerializer, DefaultFormats, Extraction, ShortTypeHints, TypeHints, jackson}
 import scodec.bits.ByteVector
 
 import java.net.InetSocketAddress

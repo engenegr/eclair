@@ -20,7 +20,7 @@ import fr.acinq.bitcoin.{Btc, ByteVector32, OutPoint, Satoshi, Transaction, TxOu
 import fr.acinq.eclair._
 import fr.acinq.eclair.api.serde._
 import fr.acinq.eclair.balance.CheckBalance
-import fr.acinq.eclair.balance.CheckBalance.{ClosingBalance, MainAndHtlcBalance, PossiblyPublishedMainAndHtlcBalance, PossiblyPublishedMainBalance}
+import fr.acinq.eclair.balance.CheckBalance.{ClosingBalance, GlobalBalance, MainAndHtlcBalance, PossiblyPublishedMainAndHtlcBalance, PossiblyPublishedMainBalance}
 import fr.acinq.eclair.channel.Origin
 import fr.acinq.eclair.payment.{PaymentRequest, PaymentSettlingOnChain}
 import fr.acinq.eclair.transactions.Transactions._
