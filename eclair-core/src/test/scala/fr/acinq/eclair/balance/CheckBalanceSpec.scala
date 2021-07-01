@@ -1,7 +1,7 @@
 package fr.acinq.eclair.balance
 
 import fr.acinq.bitcoin.{ByteVector32, SatoshiLong}
-import fr.acinq.eclair.balance.CheckBalance.{BalanceResult, ClosingBalance, PossiblyPublishedBalance}
+import fr.acinq.eclair.balance.CheckBalance.{OffChainBalance, ClosingBalance, PossiblyPublishedBalance}
 import fr.acinq.eclair.blockchain.bitcoind.rpc.ExtendedBitcoinClient
 import fr.acinq.eclair.db.jdbc.JdbcUtils.ExtendedResultSet._
 import fr.acinq.eclair.db.pg.PgUtils.using
@@ -35,7 +35,7 @@ class CheckBalanceSpec extends AnyFunSuite {
       }
       q.toSet
     }
-    val res = CheckBalance.computeBalance(channels, knownPreimages)
+    val res = CheckBalance.computeOffChainBalance(channels, knownPreimages)
     println(res)
     println(res.total)
   }
@@ -51,7 +51,7 @@ class CheckBalanceSpec extends AnyFunSuite {
         Future.successful(if (knownTxids.contains(txid)) Some(42) else None)
     }
 
-    val bal1 = BalanceResult(
+    val bal1 = OffChainBalance(
       closing = ClosingBalance(
         localCloseBalance = PossiblyPublishedBalance(
           toLocal = Map(
@@ -79,7 +79,7 @@ class CheckBalanceSpec extends AnyFunSuite {
     val bal2 = Await.result(CheckBalance.prunePublishedTransactions(bal1, bitcoinClient)(ExecutionContext.Implicits.global), 10 seconds)
 
 
-    assert(bal2 == BalanceResult(
+    assert(bal2 == OffChainBalance(
       closing = ClosingBalance(
         localCloseBalance = PossiblyPublishedBalance(
           toLocal = Map(

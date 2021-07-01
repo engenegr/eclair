@@ -148,8 +148,8 @@ class JsonSerializersSpec extends AnyFunSuite with Matchers {
   test("GlobalBalance serializer") {
     import fr.acinq.bitcoin.SatoshiLong
     val gb = GlobalBalance(
-      onchain = CheckBalance.CorrectedOnchainBalance(Btc(0.5), Btc(0.05)),
-      offchain = CheckBalance.BalanceResult(normal = MainAndHtlcBalance(
+      onChain = CheckBalance.CorrectedOnChainBalance(Btc(0.5), Btc(0.05)),
+      offChain = CheckBalance.OffChainBalance(normal = MainAndHtlcBalance(
         toLocal = Btc(0.2),
         htlcOut = Btc(0.05)
       ),
@@ -160,7 +160,7 @@ class JsonSerializersSpec extends AnyFunSuite with Matchers {
         ))),
       mutualClose = MutualCloseStatus(1.sat, 2.sat, 3.sat)
     )
-    JsonSupport.serialization.write(gb)(JsonSupport.formats) shouldBe """{"total":1.0,"onchain":{"confirmed":0.5,"unconfirmed":0.05},"offchain":{"waitForFundingConfirmed":0.0,"waitForFundingLocked":0.0,"normal":{"toLocal":0.2,"htlcOut":0.05},"shutdown":{"toLocal":0.0,"htlcOut":0.0},"negotiating":0.0,"closing":{"localCloseBalance":{"toLocal":{"4d176ad844c363bed59edf81962b008faa6194c3b3757ffcd26ba60f95716db2":0.1},"htlcs":{"94b70cec5a98d67d17c6e3de5c7697f8a6cab4f698df91e633ce35efa3574d71":0.03,"a844edd41ce8503864f3c95d89d850b177a09d7d35e950a7d27c14abb63adb13":0.06},"htlcsUnpublished":0.01},"remoteCloseBalance":{"toLocal":{},"htlcs":{},"htlcsUnpublished":0.0},"unknownCloseBalance":{"toLocal":0.0,"htlcOut":0.0}},"waitForPublishFutureCommitment":0.0},"mutualClose":{"unpublished":1,"unconfirmed":2,"confirmed":3}}"""
+    JsonSupport.serialization.write(gb)(JsonSupport.formats) shouldBe """{"total":1.0,"onChain":{"confirmed":0.5,"unconfirmed":0.05},"offChain":{"waitForFundingConfirmed":0.0,"waitForFundingLocked":0.0,"normal":{"toLocal":0.2,"htlcOut":0.05},"shutdown":{"toLocal":0.0,"htlcOut":0.0},"negotiating":0.0,"closing":{"localCloseBalance":{"toLocal":{"4d176ad844c363bed59edf81962b008faa6194c3b3757ffcd26ba60f95716db2":0.1},"htlcs":{"94b70cec5a98d67d17c6e3de5c7697f8a6cab4f698df91e633ce35efa3574d71":0.03,"a844edd41ce8503864f3c95d89d850b177a09d7d35e950a7d27c14abb63adb13":0.06},"htlcsUnpublished":0.01},"remoteCloseBalance":{"toLocal":{},"htlcs":{},"htlcsUnpublished":0.0},"unknownCloseBalance":{"toLocal":0.0,"htlcOut":0.0}},"waitForPublishFutureCommitment":0.0},"mutualClose":{"unpublished":1,"unconfirmed":2,"confirmed":3}}"""
   }
 
   test("type hints") {

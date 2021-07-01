@@ -48,19 +48,19 @@ private class BalanceActor(context: ActorContext[Command],
     case WrappedGlobalBalance(res) =>
       res match {
         case Success(result) =>
-          log.info("current balance: total={} onchain.confirmed={} onchain.unconfirmed={} offchain={} openback.pay-to-open={} openback.swap-in={}", result.total.toDouble, result.onchain.confirmed.toDouble, result.onchain.unconfirmed.toDouble, result.offchain.total.toDouble)
+          log.info("current balance: total={} onchain.confirmed={} onchain.unconfirmed={} offchain={} openback.pay-to-open={} openback.swap-in={}", result.total.toDouble, result.onChain.confirmed.toDouble, result.onChain.unconfirmed.toDouble, result.offChain.total.toDouble)
           log.debug("current balance details : {}", result)
           Metrics.GlobalBalance.withoutTags().update(result.total.toMilliBtc.toDouble)
-          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.OnchainConfirmed).update(result.onchain.confirmed.toMilliBtc.toLong)
-          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.OnchainUnconfirmed).update(result.onchain.unconfirmed.toMilliBtc.toLong)
-          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.Offchain).withTag(Tags.OffchainState, Tags.OffchainStates.waitForFundingConfirmed).update(result.offchain.waitForFundingConfirmed.toMilliBtc.toLong)
-          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.Offchain).withTag(Tags.OffchainState, Tags.OffchainStates.waitForFundingLocked).update(result.offchain.waitForFundingLocked.toMilliBtc.toLong)
-          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.Offchain).withTag(Tags.OffchainState, Tags.OffchainStates.normal).update(result.offchain.normal.total.toMilliBtc.toLong)
-          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.Offchain).withTag(Tags.OffchainState, Tags.OffchainStates.shutdown).update(result.offchain.shutdown.total.toMilliBtc.toLong)
-          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.Offchain).withTag(Tags.OffchainState, Tags.OffchainStates.closingLocal).update(result.offchain.closing.localCloseBalance.total.toMilliBtc.toLong)
-          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.Offchain).withTag(Tags.OffchainState, Tags.OffchainStates.closingRemote).update(result.offchain.closing.remoteCloseBalance.total.toMilliBtc.toLong)
-          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.Offchain).withTag(Tags.OffchainState, Tags.OffchainStates.closingUnknown).update(result.offchain.closing.unknownCloseBalance.total.toMilliBtc.toLong)
-          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.Offchain).withTag(Tags.OffchainState, Tags.OffchainStates.waitForPublishFutureCommitment).update(result.offchain.waitForPublishFutureCommitment.toMilliBtc.toLong)
+          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.OnchainConfirmed).update(result.onChain.confirmed.toMilliBtc.toLong)
+          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.OnchainUnconfirmed).update(result.onChain.unconfirmed.toMilliBtc.toLong)
+          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.Offchain).withTag(Tags.OffchainState, Tags.OffchainStates.waitForFundingConfirmed).update(result.offChain.waitForFundingConfirmed.toMilliBtc.toLong)
+          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.Offchain).withTag(Tags.OffchainState, Tags.OffchainStates.waitForFundingLocked).update(result.offChain.waitForFundingLocked.toMilliBtc.toLong)
+          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.Offchain).withTag(Tags.OffchainState, Tags.OffchainStates.normal).update(result.offChain.normal.total.toMilliBtc.toLong)
+          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.Offchain).withTag(Tags.OffchainState, Tags.OffchainStates.shutdown).update(result.offChain.shutdown.total.toMilliBtc.toLong)
+          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.Offchain).withTag(Tags.OffchainState, Tags.OffchainStates.closingLocal).update(result.offChain.closing.localCloseBalance.total.toMilliBtc.toLong)
+          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.Offchain).withTag(Tags.OffchainState, Tags.OffchainStates.closingRemote).update(result.offChain.closing.remoteCloseBalance.total.toMilliBtc.toLong)
+          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.Offchain).withTag(Tags.OffchainState, Tags.OffchainStates.closingUnknown).update(result.offChain.closing.unknownCloseBalance.total.toMilliBtc.toLong)
+          Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.Offchain).withTag(Tags.OffchainState, Tags.OffchainStates.waitForPublishFutureCommitment).update(result.offChain.waitForPublishFutureCommitment.toMilliBtc.toLong)
           refBalance_opt match {
             case Some(refBalance) =>
               val normalizedValue = 100 + (if (refBalance.total.toSatoshi.toLong > 0) (result.total.toSatoshi.toLong - refBalance.total.toSatoshi.toLong) * 1000D / refBalance.total.toSatoshi.toLong else 0)

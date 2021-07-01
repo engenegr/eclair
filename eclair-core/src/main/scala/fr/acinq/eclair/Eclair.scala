@@ -23,7 +23,7 @@ import fr.acinq.bitcoin.Crypto.PublicKey
 import fr.acinq.bitcoin.{Btc, ByteVector32, ByteVector64, Crypto, Satoshi}
 import fr.acinq.eclair.TimestampQueryFilters._
 import fr.acinq.eclair.balance.CheckBalance
-import fr.acinq.eclair.balance.CheckBalance.{BalanceResult, CorrectedOnchainBalance}
+import fr.acinq.eclair.balance.CheckBalance.{OffChainBalance, CorrectedOnChainBalance}
 import fr.acinq.eclair.blockchain.OnChainBalance
 import fr.acinq.eclair.blockchain.bitcoind.BitcoinCoreWallet
 import fr.acinq.eclair.blockchain.bitcoind.BitcoinCoreWallet.WalletTransaction
@@ -59,8 +59,8 @@ case class TimestampQueryFilters(from: Long, to: Long)
 
 case class MutualCloseStatus(unpublished: Satoshi, unconfirmed: Satoshi, confirmed: Satoshi)
 
-case class GlobalBalance (onchain: CorrectedOnchainBalance, offchain: BalanceResult, mutualClose: MutualCloseStatus) {
-  val total: Btc = onchain.total + offchain.total
+case class GlobalBalance (onChain: CorrectedOnChainBalance, offChain: OffChainBalance, mutualClose: MutualCloseStatus) {
+  val total: Btc = onChain.total + offChain.total
 }
 
 case class SignedMessage(nodeId: PublicKey, message: String, signature: ByteVector)
@@ -453,7 +453,7 @@ class EclairImpl(appKit: Kit) extends Eclair with Logging {
         } yield channelsRes.collect { case RES_GETINFO(_, _, _, data: HasCommitments) => data }
       }
       knownPreimages = appKit.nodeParams.db.pendingCommands.listSettlementCommands().collect { case (channelId, cmd: CMD_FULFILL_HTLC) => (channelId, cmd.id) }.toSet
-      rawBalanceResult = CheckBalance.computeBalance(channels, knownPreimages)
+      rawBalanceResult = CheckBalance.computeOffChainBalance(channels, knownPreimages)
       balanceResults <- CheckBalance.prunePublishedTransactions(rawBalanceResult, bitcoinClient)
       mutualCloseStatus <- CheckBalance.mutualCloseStatus(channels, bitcoinClient)
     } yield {

@@ -54,7 +54,7 @@ object CheckBalance {
   /**
    * The overall balance among all channels in all states.
    */
-  case class BalanceResult(
+  case class OffChainBalance(
                             waitForFundingConfirmed: Btc = 0.sat,
                             waitForFundingLocked: Btc = 0.sat,
                             normal: MainAndHtlcBalance = MainAndHtlcBalance(),
@@ -179,9 +179,9 @@ object CheckBalance {
    *   - In the other cases, we simply take our local amount
    *   - TODO?: we disregard anchor outputs
    */
-  def computeBalance(channels: Iterable[HasCommitments], knownPreimages: Set[(ByteVector32, Long)]): BalanceResult = {
+  def computeOffChainBalance(channels: Iterable[HasCommitments], knownPreimages: Set[(ByteVector32, Long)]): OffChainBalance = {
     channels
-      .foldLeft(BalanceResult()) {
+      .foldLeft(OffChainBalance()) {
         case (r, d: DATA_WAIT_FOR_FUNDING_CONFIRMED) => r.modify(_.waitForFundingConfirmed).using(updateMainBalance(d.commitments.localCommit))
         case (r, d: DATA_WAIT_FOR_FUNDING_LOCKED) => r.modify(_.waitForFundingLocked).using(updateMainBalance(d.commitments.localCommit))
         case (r, d: DATA_NORMAL) => r.modify(_.normal).using(updateMainAndHtlcBalance(d.commitments.localCommit, knownPreimages))
@@ -212,7 +212,7 @@ object CheckBalance {
   /**
    * Query bitcoin core to prune all amounts related to transactions that have already been published
    */
-  def prunePublishedTransactions(br: BalanceResult, bitcoinClient: ExtendedBitcoinClient)(implicit ec: ExecutionContext): Future[BalanceResult] = {
+  def prunePublishedTransactions(br: OffChainBalance, bitcoinClient: ExtendedBitcoinClient)(implicit ec: ExecutionContext): Future[OffChainBalance] = {
     for {
       txs: Iterable[Option[(ByteVector32, Int)]] <- Future.sequence((br.closing.localCloseBalance.toLocal.keys ++
         br.closing.localCloseBalance.htlcs.keys ++
@@ -273,7 +273,7 @@ object CheckBalance {
     }
   }
 
-  case class CorrectedOnchainBalance(confirmed: Btc, unconfirmed: Btc) {
+  case class CorrectedOnChainBalance(confirmed: Btc, unconfirmed: Btc) {
     val total: Btc = confirmed + unconfirmed
   }
 
@@ -284,12 +284,12 @@ object CheckBalance {
    * Confirmed swap-in transactions are counted, because we can spend them, but we keep track of what we still owe to our
    * users.
    */
-  def onChain(bitcoinClient: ExtendedBitcoinClient)(implicit ec: ExecutionContext): Future[CorrectedOnchainBalance] = for {
+  def onChain(bitcoinClient: ExtendedBitcoinClient)(implicit ec: ExecutionContext): Future[CorrectedOnChainBalance] = for {
     utxos <- bitcoinClient.listUnspent()
     detailed = utxos.foldLeft(DetailedBalance()) {
      case (total, utxo) if utxo.confirmations > 0 => total.modify(_.confirmed).using(_ + utxo.amount)
       case (total, utxo) if utxo.confirmations == 0 => total.modify(_.unconfirmed).using(_ + utxo.amount)
     }
-  } yield CorrectedOnchainBalance(detailed.confirmed, detailed.unconfirmed)
+  } yield CorrectedOnChainBalance(detailed.confirmed, detailed.unconfirmed)
 
 }
