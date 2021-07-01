@@ -51,7 +51,9 @@ private class ChannelsListener(context: ActorContext[Command]) {
             context.watchWith(channel.toTyped, ChannelDied(channelId))
             running(channels + (channelId -> data))
           case _ =>
-            // if channel is closed we remove early from the map because
+            // if channel is closed we remove early from the map because we want to minimize the window during which
+            // there is potential duplication between on-chain and off-chain amounts (the channel actors stays alive
+            // for a few seconds after the channel is closed)
             log.debug("remove channel={} from list (closed)", channelId)
             context.unwatch(channel.toTyped)
             running(channels - channelId)
