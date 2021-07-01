@@ -57,8 +57,6 @@ case class AuditResponse(sent: Seq[PaymentSent], received: Seq[PaymentReceived],
 
 case class TimestampQueryFilters(from: Long, to: Long)
 
-case class MutualCloseStatus(unpublished: Satoshi, unconfirmed: Satoshi, confirmed: Satoshi)
-
 case class GlobalBalance (onChain: CorrectedOnChainBalance, offChain: OffChainBalance) {
   val total: Btc = onChain.total + offChain.total
 }
