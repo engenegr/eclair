@@ -81,7 +81,7 @@ private class BalanceActor(context: ActorContext[Command],
     case WrappedGlobalBalance(res) =>
       res match {
         case Success(result) =>
-          log.info("current balance: total={} onchain.confirmed={} onchain.unconfirmed={} offchain={} openback.pay-to-open={} openback.swap-in={}", result.total.toDouble, result.onChain.confirmed.toDouble, result.onChain.unconfirmed.toDouble, result.offChain.total.toDouble)
+          log.info("current balance: total={} onchain.confirmed={} onchain.unconfirmed={} offchain={}", result.total.toDouble, result.onChain.confirmed.toDouble, result.onChain.unconfirmed.toDouble, result.offChain.total.toDouble)
           log.debug("current balance details : {}", result)
           Metrics.GlobalBalance.withoutTags().update(result.total.toMilliBtc.toDouble)
           Metrics.GlobalBalanceDetailed.withTag(Tags.BalanceType, Tags.BalanceTypes.OnchainConfirmed).update(result.onChain.confirmed.toMilliBtc.toLong)
