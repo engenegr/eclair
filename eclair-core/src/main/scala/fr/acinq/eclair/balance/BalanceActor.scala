@@ -1,5 +1,6 @@
 package fr.acinq.eclair.balance
 
+import akka.actor.Status
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, Behavior}
 import fr.acinq.bitcoin.ByteVector32
@@ -22,7 +23,7 @@ object BalanceActor {
   // @formatter:off
   sealed trait Command
   private final case object TickBalance extends Command
-  final case class GetGlobalBalance(replyTo: ActorRef[Future[GlobalBalance]], channels: Map[ByteVector32, HasCommitments]) extends Command
+  final case class GetGlobalBalance(replyTo: ActorRef[Try[GlobalBalance]], channels: Map[ByteVector32, HasCommitments]) extends Command
   private final case class WrappedChannels(wrapped: ChannelsListener.GetChannelsResponse) extends Command
   private final case class WrappedGlobalBalance(wrapped: Try[GlobalBalance]) extends Command
   private final case class WrappedUtxoInfo(wrapped: Try[UtxoInfo]) extends Command
@@ -112,7 +113,7 @@ private class BalanceActor(context: ActorContext[Command],
           Behaviors.same
       }
     case GetGlobalBalance(replyTo, channels) =>
-      replyTo ! CheckBalance.computeGlobalBalance(channels, pendingCommandsDb, extendedBitcoinClient)
+      CheckBalance.computeGlobalBalance(channels, pendingCommandsDb, extendedBitcoinClient) onComplete (replyTo ! _)
       Behaviors.same
     case WrappedUtxoInfo(res) =>
       res match {

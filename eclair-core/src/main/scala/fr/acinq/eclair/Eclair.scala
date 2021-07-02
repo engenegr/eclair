@@ -49,7 +49,7 @@ import scodec.bits.ByteVector
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 import scala.concurrent.duration._
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.reflect.ClassTag
 
 case class GetInfoResponse(version: String, nodeId: PublicKey, alias: String, color: String, features: Features, chainHash: ByteVector32, network: String, blockHeight: Int, publicAddresses: Seq[NodeAddress], instanceId: String)
@@ -438,7 +438,8 @@ class EclairImpl(appKit: Kit) extends Eclair with Logging {
   override def globalBalance()(implicit timeout: Timeout): Future[GlobalBalance] = {
     for {
       ChannelsListener.GetChannelsResponse(channels) <- appKit.channelsListener.ask(ref => ChannelsListener.GetChannels(ref))(timeout, appKit.system.scheduler.toTyped)
-      globalBalance <- appKit.balanceActor.ask(res => BalanceActor.GetGlobalBalance(res, channels))(timeout, appKit.system.scheduler.toTyped).flatten
+      globalBalance_try <- appKit.balanceActor.ask(res => BalanceActor.GetGlobalBalance(res, channels))(timeout, appKit.system.scheduler.toTyped)
+      globalBalance <- Promise[GlobalBalance]().complete(globalBalance_try).future
     } yield globalBalance
   }
 
